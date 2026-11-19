@@ -1,0 +1,6 @@
+.git
+project-kit
+.kit-state
+app.env
+**/node_modules
+frontend/dist
