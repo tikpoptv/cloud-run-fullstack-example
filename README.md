@@ -1,108 +1,142 @@
 # Cloud Run Full-Stack Example
 
-A minimal **frontend + backend in one container** that deploys to Google Cloud Run.
-A Node build produces the static frontend, and a Flask (gunicorn) backend serves both the web page and the `/api` routes from a single port.
+A reference implementation of a web application whose **frontend and backend are packaged in a single container** and deployed to Google Cloud Run.
 
-Made as a reference for the CPE334 Final Project, where each team gets one Cloud Run service, so the frontend and backend share one URL and one container.
+The frontend is compiled by Node.js during the image build. A Flask application, served by gunicorn, then delivers both the compiled static assets and the HTTP API from one port. This repository was prepared as a supporting example for the CPE334 Final Project, in which each team is provisioned a single Cloud Run service.
 
-> ไทย: ตัวอย่างหน้าบ้าน + หลังบ้านรวมใน container เดียว (ดูสรุปภาษาไทยท้ายไฟล์)
+> สรุปภาษาไทยอยู่ท้ายเอกสาร (Thai summary at the end of this document).
 
-## How it works
+## Contents
+
+1. [Architecture](#architecture)
+2. [Repository structure](#repository-structure)
+3. [Prerequisites](#prerequisites)
+4. [Running locally](#running-locally)
+5. [Deployment](#deployment)
+6. [Configuration](#configuration)
+7. [Adapting the example](#adapting-the-example)
+8. [Scope and limitations](#scope-and-limitations)
+9. [Verification status](#verification-status)
+10. [สรุปภาษาไทย](#สรุปภาษาไทย)
+11. [License](#license)
+
+## Architecture
 
 ```
-Browser ──► https://<your-service>.run.app
-              │
-              └─ gunicorn → Flask (one process, one port: $PORT)
-                    ├─ GET /            → static/index.html (built by Node)
-                    ├─ GET /<file>      → files from static/
-                    └─ GET /api/hello   → JSON from the backend
+Client ──► https://<service>.run.app
+             │
+             └─ gunicorn ► Flask application (single process, single port: $PORT)
+                   ├─ GET /           → static/index.html   (built by Node.js)
+                   ├─ GET /<file>     → static/<file>
+                   └─ GET /api/hello  → JSON response from the backend
 ```
 
-The Dockerfile is multi-stage:
+The `Dockerfile` defines two build stages:
 
-1. `node:22-slim` runs `npm run build` and writes `frontend/dist`.
-2. `python:3.12-slim` installs the backend requirements, copies the backend, and copies `dist` into `static/`.
+| Stage | Base image | Responsibility |
+|---|---|---|
+| `frontend` | `node:22-slim` | Runs `npm run build` and produces `frontend/dist` |
+| final | `python:3.12-slim` | Installs backend dependencies, copies the backend, and copies `dist` to `static/` |
 
-The frontend calls the backend with a relative path (`fetch('/api/hello')`), so there is no CORS setup and no second service.
+The frontend addresses the backend with a relative path (`fetch('/api/hello')`). Both are served from the same origin, so no CORS configuration and no second service are required.
 
-## Project layout
+## Repository structure
 
 ```
 .
 ├── Dockerfile
 ├── frontend/
-│   ├── package.json     # "build": "node build.js"
-│   ├── build.js         # copies src/ to dist/ (replace with Vite/webpack/etc.)
+│   ├── package.json      build script: "node build.js"
+│   ├── build.js          copies src/ to dist/ (replace with Vite, webpack, etc.)
 │   └── src/index.html
 └── backend/
-    ├── app.py           # Flask app: /api/hello + static file serving
+    ├── app.py            Flask application: /api/hello and static file serving
     └── requirements.txt
 ```
 
-## Run locally
+## Prerequisites
+
+- Docker, for building and running the image locally.
+- For deployment to the course environment: the Google Cloud CLI (`gcloud`) and the CPE334 Project Kit.
+
+## Running locally
 
 ```bash
 docker build -t fullstack-example .
 docker run --rm -p 8080:8080 -e TEST_FLAG=hello fullstack-example
 ```
 
-Then open <http://localhost:8080> and <http://localhost:8080/api/hello>.
-
-Expected API response:
+The application is then available at <http://localhost:8080>. The API can be queried at <http://localhost:8080/api/hello>, which returns:
 
 ```json
 {"example":"fullstack","flag":"hello","has_database_url":false,"ok":true}
 ```
 
-## Deploy to Cloud Run
+## Deployment
 
-### With the CPE334 Project Kit
+### Using the CPE334 Project Kit
 
-Download the kit from the student portal (Final Project Kit tab), unzip it into this folder so you have `project-kit/`, then:
-
-```bash
-./project-kit/kit.sh doctor    # check your setup
-./project-kit/kit.sh build     # build and push the image
-./project-kit/kit.sh deploy    # deploy to your team's service
-./project-kit/kit.sh status
-```
-
-Run `build` again whenever the code changes. `deploy` uses the image recorded by the last `build`.
-
-### With plain gcloud (any Cloud Run project)
+1. Download the kit from the student portal (**Final Project Kit** tab).
+2. Extract it into the root of this repository so that the `project-kit/` directory exists.
+3. Run the following commands from the repository root:
 
 ```bash
-gcloud run deploy my-service --source . --region <region>
+./project-kit/kit.sh doctor    # verify the local setup and access
+./project-kit/kit.sh build     # build the image and push it to the team registry
+./project-kit/kit.sh deploy    # deploy the image to the team's Cloud Run service
+./project-kit/kit.sh status    # display the current revision and image
 ```
 
-## Adapt it to your project
+`deploy` uses the image recorded by the most recent `build`. After any code change, run `build` again before `deploy`.
 
-| You want to… | Change |
+### Using gcloud directly
+
+For any Google Cloud project outside the course environment:
+
+```bash
+gcloud run deploy <service-name> --source . --region <region>
+```
+
+## Configuration
+
+| Variable | Provided by | Purpose |
+|---|---|---|
+| `PORT` | Cloud Run | Port on which the server listens. gunicorn reads it automatically |
+| `DATABASE_URL` | Deployment configuration | Database connection string (optional; not used by this example) |
+| `TEST_FLAG` | Deployment configuration | Demonstration value echoed by `/api/hello` |
+
+Credentials and connection strings must not be committed to the repository. Store sensitive values as secrets.
+
+## Adapting the example
+
+| Objective | Required change |
 |---|---|
-| Use React / Vue / Vite | Put the app in `frontend/`, make `npm run build` write to `frontend/dist` (for Vite, set `build.outDir` or copy it). Install dependencies in the Dockerfile before the build, e.g. `RUN npm ci` |
-| Use another backend language | Replace the second stage. Keep the same idea: copy `dist` next to the server and have the server listen on `$PORT` |
-| Add a database | Read the connection string from `DATABASE_URL`; never commit it. Use secrets for passwords |
-| Add API routes | Add routes under `/api/...` in `backend/app.py`, and keep them before the catch-all static route |
+| Use React, Vue, or Vite | Place the application in `frontend/`. Ensure `npm run build` writes to `frontend/dist`, and install dependencies in the first stage (for example `RUN npm ci`) before the build step |
+| Use a different backend language | Replace the final stage. Retain the same structure: copy `dist` beside the server and listen on `$PORT` |
+| Add a database | Read the connection string from `DATABASE_URL` |
+| Add API routes | Define routes under `/api/` in `backend/app.py`, ahead of the catch-all static route |
 
-## What this example is not
+## Scope and limitations
 
-- It runs **one service**. It does not show separate frontend/backend services or sidecar containers.
-- It has no database code, migrations, tests, or authentication.
-- The frontend build is intentionally dependency-free so the example stays small. Builds with real npm dependencies take longer and produce larger images.
+- The example deploys **one service** and one container. It does not demonstrate separate frontend and backend services, or multi-container (sidecar) deployments.
+- It contains no database access, migrations, automated tests, or authentication.
+- The frontend build has no third-party dependencies, which keeps the example small. Builds with real npm dependencies take longer and produce larger images.
 
-## Tested
+## Verification status
 
-Built and run locally with Docker, and the same layout was deployed to a Cloud Run service with the CPE334 Project Kit. `/` and `/api/hello` returned HTTP 200 and an unknown path returned 404.
+- The image was built and run locally with Docker. `/` and `/api/hello` returned HTTP 200.
+- An equivalent layout was deployed to a Cloud Run service using the CPE334 Project Kit. `/` and `/api/hello` returned HTTP 200, and an unknown path returned HTTP 404.
+- The exact `Dockerfile` in this repository was verified locally. The earlier Cloud Run deployment used an equivalent `CMD` written in shell form.
 
 ## สรุปภาษาไทย
 
-- ตัวอย่างนี้รวมหน้าบ้านและหลังบ้านไว้ใน **container เดียว** ใช้พอร์ตเดียว (`$PORT`)
-- Dockerfile แบบ multi-stage: ขั้นแรกใช้ Node build หน้าบ้าน ขั้นสองใช้ Python (Flask + gunicorn) เสิร์ฟทั้งหน้าเว็บและ `/api`
+- ตัวอย่างนี้รวมหน้าบ้านและหลังบ้านไว้ใน **container เดียว** และใช้พอร์ตเดียว (`$PORT`)
+- `Dockerfile` เป็นแบบ multi-stage: ขั้นแรกใช้ Node.js สร้างหน้าบ้าน ขั้นที่สองใช้ Python (Flask และ gunicorn) ให้บริการทั้งหน้าเว็บและ `/api`
 - หน้าบ้านเรียก API ด้วยพาธสัมพัทธ์ (`/api/hello`) จึงไม่ต้องตั้งค่า CORS
-- รันในเครื่อง: `docker build -t fullstack-example .` แล้ว `docker run --rm -p 8080:8080 fullstack-example`
-- Deploy ด้วย Project Kit: แตกไฟล์ kit ไว้ในโฟลเดอร์นี้ แล้วรัน `doctor` → `build` → `deploy` (ถ้าแก้โค้ดต้อง `build` ใหม่ทุกครั้ง)
-- ข้อจำกัด: ตัวอย่างนี้ไม่มีฐานข้อมูล, ไม่มี migration, และไม่ได้แยกหน้าบ้าน/หลังบ้านเป็นสอง service
+- การรันในเครื่อง: `docker build -t fullstack-example .` และ `docker run --rm -p 8080:8080 fullstack-example`
+- การ deploy ด้วย Project Kit: แตกไฟล์ kit ไว้ในโฟลเดอร์โปรเจกต์ แล้วรัน `doctor`, `build`, `deploy` ตามลำดับ หากแก้โค้ดต้องรัน `build` ใหม่ทุกครั้งก่อน `deploy`
+- ข้อจำกัด: ไม่มีฐานข้อมูล, migration, การทดสอบอัตโนมัติ และไม่ได้แยกหน้าบ้านกับหลังบ้านเป็นสอง service
 
 ## License
 
-MIT
+Released under the MIT License. See [LICENSE](LICENSE).
