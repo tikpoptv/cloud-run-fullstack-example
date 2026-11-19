@@ -22,13 +22,14 @@ The frontend is compiled by Node.js during the image build. A Flask application,
 
 ## Architecture
 
-```
-Client ──► https://<service>.run.app
-             │
-             └─ gunicorn ► Flask application (single process, single port: $PORT)
-                   ├─ GET /           → static/index.html   (built by Node.js)
-                   ├─ GET /<file>     → static/<file>
-                   └─ GET /api/hello  → JSON response from the backend
+```mermaid
+flowchart LR
+    C["Client"] -- "HTTPS" --> S["https://&lt;service&gt;.run.app"]
+    S --> G["gunicorn<br/>(one process, port $PORT)"]
+    G --> F["Flask application"]
+    F -- "GET /" --> I["static/index.html<br/>(built by Node.js)"]
+    F -- "GET /&lt;file&gt;" --> ST["static/&lt;file&gt;"]
+    F -- "GET /api/hello" --> J["JSON response"]
 ```
 
 The `Dockerfile` defines two build stages:
@@ -37,6 +38,15 @@ The `Dockerfile` defines two build stages:
 |---|---|---|
 | `frontend` | `node:22-slim` | Runs `npm run build` and produces `frontend/dist` |
 | final | `python:3.12-slim` | Installs backend dependencies, copies the backend, and copies `dist` to `static/` |
+
+Build flow:
+
+```mermaid
+flowchart LR
+    SRC["frontend/"] --> N["Stage 1: node:22-slim<br/>npm run build"] --> D["frontend/dist"]
+    BE["backend/"] --> PY["Stage 2: python:3.12-slim<br/>pip install + copy"]
+    D -- "COPY --from=frontend" --> PY --> IMG(["Container image"])
+```
 
 The frontend addresses the backend with a relative path (`fetch('/api/hello')`). Both are served from the same origin, so no CORS configuration and no second service are required.
 
